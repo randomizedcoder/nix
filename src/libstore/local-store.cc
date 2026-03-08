@@ -245,7 +245,11 @@ LocalStore::LocalStore(ref<const Config> config)
     }
 
     if (!config->readOnly && !lockFile(globalLock.get(), ltRead, false)) {
-        printInfo("waiting for the big Nix store lock...");
+        if (getEnv("NIX_DEBUG_LOCK"))
+            printInfo(
+                "waiting for the big Nix store lock (pid %d, lock path: %s)...", getpid(), PathFmt(dbDir / "big-lock"));
+        else
+            printInfo("waiting for the big Nix store lock...");
         lockFile(globalLock.get(), ltRead, true);
     }
 

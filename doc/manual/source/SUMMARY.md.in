@@ -146,6 +146,7 @@
   - [Testing](development/testing.md)
   - [Benchmarking](development/benchmarking.md)
   - [Debugging](development/debugging.md)
+  - [SQLite Locking](development/sqlite-locking.md)
   - [Documentation](development/documentation.md)
   - [CLI guideline](development/cli-guideline.md)
   - [JSON guideline](development/json-guideline.md)

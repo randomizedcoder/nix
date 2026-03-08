@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <thread>
+#include <unistd.h>
 
 namespace nix {
 
@@ -44,10 +45,20 @@ SQLiteError::SQLiteError(
     auto errMsg = sqlite3_errmsg(db);
 
     if (err == SQLITE_BUSY || err == SQLITE_PROTOCOL) {
+        static bool lockDebug = getEnv("NIX_DEBUG_LOCK").has_value();
         auto exp = SQLiteBusy(path, errMsg, err, exterr, offset, std::move(hf));
-        exp.err.msg = HintFmt(
-            err == SQLITE_PROTOCOL ? "SQLite database '%s' is busy (SQLITE_PROTOCOL)" : "SQLite database '%s' is busy",
-            path ? path : "(in-memory)");
+        if (lockDebug)
+            exp.err.msg = HintFmt(
+                "SQLite database '%s' is busy (errcode %d, extended %d): %s",
+                path ? path : "(in-memory)",
+                err,
+                exterr,
+                errMsg);
+        else
+            exp.err.msg = HintFmt(
+                err == SQLITE_PROTOCOL ? "SQLite database '%s' is busy (SQLITE_PROTOCOL)"
+                                       : "SQLite database '%s' is busy",
+                path ? path : "(in-memory)");
         throw exp;
     } else
         throw SQLiteError(path, errMsg, err, exterr, offset, std::move(hf));
@@ -278,8 +289,27 @@ SQLiteTxn::~SQLiteTxn()
 
 void handleSQLiteBusy(const SQLiteBusy & e, time_t & nextWarning)
 {
+    static bool lockDebug = getEnv("NIX_DEBUG_LOCK").has_value();
+
     time_t now = time(nullptr);
-    if (now > nextWarning) {
+
+    if (lockDebug) {
+        using namespace std::chrono;
+        static thread_local int retryCount = 0;
+        static thread_local steady_clock::time_point firstRetry;
+        if (retryCount == 0)
+            firstRetry = steady_clock::now();
+        retryCount++;
+        auto elapsedMs = duration_cast<milliseconds>(steady_clock::now() - firstRetry).count();
+        logWarning(
+            {.msg = HintFmt(
+                 "SQLite busy (pid %d, retry #%d, elapsed %d.%03ds): %s",
+                 getpid(),
+                 retryCount,
+                 (int) (elapsedMs / 1000),
+                 (int) (elapsedMs % 1000),
+                 e.info().msg.str())});
+    } else if (now > nextWarning) {
         nextWarning = now + 10;
         logWarning({.msg = e.info().msg});
     }
