@@ -144,6 +144,8 @@
 - [Development](development/index.md)
   - [Building](development/building.md)
   - [Testing](development/testing.md)
+  - [Static Analysis](development/static-analysis.md)
+  - [Static Analysis Results](development/static-analysis-results.md)
   - [Benchmarking](development/benchmarking.md)
   - [Debugging](development/debugging.md)
   - [SQLite Locking](development/sqlite-locking.md)
