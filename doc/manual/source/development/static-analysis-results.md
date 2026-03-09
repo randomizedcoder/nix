@@ -260,27 +260,120 @@ variable access is fundamental, `chroot()` is part of the sandbox, and
 
 ## semgrep
 
-**Total findings: 1**
+**Total findings: 183** (47 rules, 26 fired, 21 clean)
 
-The analysis uses inline rules targeting dangerous C/C++ patterns (no network
-access in Nix sandbox prevents downloading community rulesets).
+The analysis uses 47 inline rules vendored in `packaging/analysis.nix` across 9
+categories. No network access is needed.
 
-### Finding
+| Severity | Findings | Rules fired |
+|----------|----------|-------------|
+| ERROR    | 0        | 0 of 3      |
+| WARNING  | 28       | 11 of 22    |
+| INFO     | 155      | 15 of 22    |
 
-**`unsafe-strcpy`** in `src/libstore-test-support/libstore-network.cc`:
-```
-strcpy() has no bounds checking — use strncpy() or std::string
-```
+### ERROR-level findings
 
-**Assessment**: This is in **test support code**, not production code. The risk
-is minimal, but it should still be fixed for code hygiene. Use `std::string` or
-`strncpy()` with explicit bounds.
+None. The 3 ERROR rules (`unsafe-gets`, `lock-guard-temporary`,
+`assert-side-effect`) found no matches — the codebase is clean on these
+high-confidence checks.
 
-### Recommendation
+### WARNING-level findings (28)
 
-Fix the `strcpy()` call. Consider expanding the semgrep ruleset with additional
-patterns (memory management, error handling) once rules can be vendored from the
-semgrep registry.
+**`const-cast`** (9 findings) — `const_cast` removes const safety:
+- `src/libexpr-tests/nix_api_expr.cc` (lines 250, 299, 334) — test code
+- `src/libstore-test-support/https-store.cc` (lines 70, 72) — test support
+- `src/libutil/include/nix/util/sync.hh:158` — production, in Sync primitive
+- `src/libutil/unix/processes.cc:455` (2 findings) — production
+- `src/libutil/windows/file-system-at.cc:41` — Windows support
+
+**`dangling-c-str`** (4 findings) — `.str().c_str()` produces dangling pointer:
+- `src/libutil-tests/logging.cc` (lines 321, 329, 337, 345) — all in test code
+
+**`toctou-access`** (3 findings) — `access()` is TOCTOU-prone:
+- `src/libutil/file-system.cc:653` — production
+- `src/nix/nix-collect-garbage/nix-collect-garbage.cc` (lines 27, 30)
+
+**`setuid-setgid`** (3 findings) — privilege changes need error checking:
+- `src/libutil/unix/processes.cc` (lines 146, 353, 358)
+
+**`insecure-rand`** (2 findings) — `rand()`/`srand()` not cryptographically secure:
+- `src/libstore/indirect-root-store.cc:11`
+- `src/libstore/sqlite.cc:321`
+
+**`chroot-usage`** (2 findings) — chroot alone is not a security boundary:
+- `src/libutil/linux/linux-namespaces.cc:118`
+- `src/nix/run.cc:240`
+
+**`sqlite-exec-non-literal`** (1 finding) — non-literal SQL in `sqlite3_exec`:
+- `src/libstore/sqlite.cc:145`
+
+**`delete-this`** (1 finding) — dangerous self-deletion:
+- `src/libexpr/eval-error.cc:98`
+
+**`vfork-usage`** (1 finding) — `vfork()` shares address space with parent:
+- `src/libutil/unix/processes.cc:192`
+
+**`detached-thread`** (1 finding) — detached thread is hard to clean up:
+- `src/libutil/unix/signals.cc:117`
+
+**`unsafe-strcpy`** (1 finding) — no bounds checking:
+- `src/libstore-test-support/libstore-network.cc:38`
+
+### INFO-level findings (155)
+
+| Rule | Findings | Files | Notes |
+|------|----------|-------|-------|
+| `c-style-pointer-cast` | 59 | 27 | C API layers and low-level code |
+| `using-namespace-std` | 19 | 15 | Mostly in test files |
+| `reinterpret-cast` | 18 | 13 | Type punning in serialization |
+| `exec-family` | 10 | 5 | Expected in build/sandbox code |
+| `chmod-on-pathname` | 9 | 7 | Store and sandbox operations |
+| `raw-free-in-cpp` | 8 | 5 | C library interop (readline, etc.) |
+| `thread-creation` | 8 | 7 | Worker threads, expected |
+| `toctou-stat` | 6 | 2 | File system operations |
+| `relaxed-memory-order` | 4 | 1 | Atomic counters in `sync.hh` |
+| `raw-malloc` | 3 | 2 | C API interop |
+| `stoi-unchecked` | 3 | 3 | String-to-int conversions |
+| `getenv-unchecked` | 3 | 1 | Environment variable reads |
+| `chown-on-pathname` | 2 | 2 | Store path ownership |
+| `strerror-thread-unsafe` | 2 | 1 | Error message formatting |
+| `fopen-raw-file-pointer` | 1 | 1 | Single legacy use |
+
+### Rules with zero findings (21)
+
+The following rules found no matches, confirming the codebase avoids these
+patterns: `dangerous-system-call`, `unsafe-sprintf`, `unsafe-strcat`,
+`potential-format-string`, `unsafe-vsprintf`, `unsafe-gets`,
+`unsafe-strncpy-strlen`, `raw-realloc`, `memset-zero-length`,
+`memcpy-sizeof-pointer`, `catch-all-no-rethrow`, `empty-catch-block`,
+`throw-in-destructor`, `signal-not-sigaction`, `popen-usage`,
+`lock-guard-temporary`, `assert-side-effect`, `fprintf-stderr`,
+`atoi-atol-usage`, `alloca-usage`.
+
+Note: `goto-usage` had a parse error (semgrep's C++ parser does not support
+matching bare `goto` statements).
+
+### Assessment
+
+The codebase is in good shape: zero ERROR findings, and most WARNING findings
+are either in test code or are intentional low-level patterns (privilege
+management, `chroot` for sandboxing, `vfork` for performance).
+
+**Priority fixes:**
+1. **Dangling `c_str()`** in `logging.cc` tests — assign `.str()` to a variable
+   before calling `.c_str()`
+2. **`unsafe-strcpy`** in test support — replace with `std::string` or
+   `strncpy()`
+3. **`sqlite-exec-non-literal`** in `sqlite.cc` — verify the SQL string is safe
+   or switch to prepared statements
+4. **`insecure-rand`** — if used for anything security-sensitive, switch to
+   `<random>` or `getrandom()`
+
+**Acceptable as-is:**
+- `const_cast` in `sync.hh` and `processes.cc` — necessary for API constraints
+- `setuid`/`setgid`/`chroot`/`vfork` — core to Nix's sandbox implementation
+- `detached-thread` in signal handler — intentional fire-and-forget
+- All INFO findings — standard systems programming patterns
 
 ---
 

@@ -128,7 +128,19 @@ This is significantly slower than regular compilation.
 
 ### semgrep
 
-Runs [semgrep](https://semgrep.dev/) with C/C++ security and correctness rules. Uses built-in rule registries to avoid network access during Nix builds.
+Runs [semgrep](https://semgrep.dev/) with 47 inline C/C++ rules vendored in `packaging/analysis.nix` (the Nix build sandbox has no network access, so rules cannot be downloaded at build time). The rules are organized into 9 categories:
+
+1. **Unsafe C String/Memory Functions** — `sprintf`, `strcpy`, `gets`, etc.
+2. **Memory Management** — raw `malloc`/`free`, `delete this`, suspect `memset`/`memcpy`
+3. **Race Conditions / TOCTOU** — `access()`, `chmod()`, `stat()` on pathnames
+4. **Type Safety and Casts** — `const_cast`, `reinterpret_cast`, C-style casts
+5. **Error Handling** — catch-all without rethrow, empty catch blocks, throw in destructors
+6. **Resource Management** — raw `fopen`, `signal()`, `vfork()`, `popen()`
+7. **Privilege and Command Execution** — `setuid`, `chroot`, `getenv`, `exec*`
+8. **Concurrency** — temporary lock guards, relaxed memory ordering, thread creation
+9. **Code Quality / Defensive Programming** — `goto`, side effects in `assert`, dangling `c_str()`
+
+Severity levels: **ERROR** (likely bugs, near-zero false positives), **WARNING** (probable issues worth investigating), **INFO** (patterns to be aware of).
 
 ### ASan + UBSan (Sanitizers)
 
