@@ -42,6 +42,8 @@ create table if not exists NARs (
     foreign key (cache) references BinaryCaches(id) on delete cascade
 );
 
+create index if not exists IndexNARsTimestamp on NARs(timestamp);
+
 create table if not exists BuildTrace (
     cache integer not null,
 
