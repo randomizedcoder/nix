@@ -1986,6 +1986,7 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
     }
 
     if (buildMode == bmCheck) {
+        buildResult.outputRegistrationDetail = detail;
         return {};
     }
 
