@@ -8,6 +8,7 @@
   freebsd,
 
   nix-util,
+  nix-metrics,
   boost,
   curl,
   aws-c-common,
@@ -83,6 +84,7 @@ mkMesonLibrary (finalAttrs: {
 
   propagatedBuildInputs = [
     nix-util
+    nix-metrics
     nlohmann_json
   ];
 
@@ -90,6 +92,7 @@ mkMesonLibrary (finalAttrs: {
     (lib.mesonEnable "seccomp-sandboxing" stdenv.hostPlatform.isLinux)
     (lib.mesonBool "embedded-sandbox-shell" embeddedSandboxShell)
     (lib.mesonEnable "s3-aws-auth" withAWS)
+    (lib.mesonEnable "build-telemetry" true)
   ]
   ++ lib.optionals withSandboxShell [
     (lib.mesonOption "sandbox-shell" sandboxShell)

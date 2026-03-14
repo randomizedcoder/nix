@@ -386,6 +386,8 @@
               "nix-util-test-support" = { };
               "nix-util-tests" = { };
 
+              "nix-metrics" = { };
+
               "nix-store" = { };
               "nix-store-c" = { };
               "nix-store-test-support" = { };
