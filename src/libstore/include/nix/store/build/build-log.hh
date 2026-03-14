@@ -4,6 +4,7 @@
 #include "nix/util/logging.hh"
 #include "nix/util/serialise.hh"
 
+#include <functional>
 #include <list>
 #include <map>
 #include <string>
@@ -43,6 +44,12 @@ public:
      * Map for tracking nested activities from JSON messages.
      */
     std::map<ActivityId, Activity> builderActivities;
+
+    /**
+     * Callback fired on each stdenv phase transition.
+     * Called with the new phase name (e.g. "buildPhase").
+     */
+    std::function<void(const std::string &)> onPhaseChange;
 
     /**
      * @param maxTailLines Maximum number of tail lines to keep

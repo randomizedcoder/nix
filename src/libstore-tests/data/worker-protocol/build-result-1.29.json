@@ -2,6 +2,8 @@
   {
     "errorMsg": "no idea why",
     "isNonDeterministic": false,
+    "phaseTimings": {},
+    "pipelineTimings": null,
     "startTime": 0,
     "status": "OutputRejected",
     "stopTime": 0,
@@ -11,6 +13,8 @@
   {
     "errorMsg": "no idea why",
     "isNonDeterministic": true,
+    "phaseTimings": {},
+    "pipelineTimings": null,
     "startTime": 30,
     "status": "NotDeterministic",
     "stopTime": 50,
@@ -32,6 +36,8 @@
         "signatures": []
       }
     },
+    "phaseTimings": {},
+    "pipelineTimings": null,
     "startTime": 30,
     "status": "Built",
     "stopTime": 50,

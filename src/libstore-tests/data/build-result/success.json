@@ -11,6 +11,8 @@
   },
   "cpuSystem": 604000000,
   "cpuUser": 500000000,
+  "phaseTimings": {},
+  "pipelineTimings": null,
   "startTime": 30,
   "status": "Built",
   "stopTime": 50,

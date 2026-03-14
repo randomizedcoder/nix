@@ -40,6 +40,9 @@ typedef enum {
     resSetExpected = 106,
     resPostBuildLogLine = 107,
     resFetchStatus = 108,
+    resPipelineTiming = 109,   // fields: [stageName: string, durationMicroseconds: uint64_t]
+    resPhaseTiming = 110,      // fields: [phaseName: string, durationMicroseconds: uint64_t]
+    resOutputRegDetail = 111,  // fields: [subOpName: string, durationMicroseconds: uint64_t]
 } ResultType;
 
 typedef uint64_t ActivityId;

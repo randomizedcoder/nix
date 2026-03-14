@@ -1,6 +1,9 @@
 #pragma once
 ///@file
 
+#include <chrono>
+#include <optional>
+
 #include "nix/store/common-protocol.hh"
 
 namespace nix {
@@ -8,7 +11,7 @@ namespace nix {
 #define SERVE_MAGIC_1 0x390c9deb
 #define SERVE_MAGIC_2 0x5452eecb
 
-#define SERVE_PROTOCOL_VERSION (2 << 8 | 8)
+#define SERVE_PROTOCOL_VERSION (2 << 8 | 9)
 #define GET_PROTOCOL_MAJOR(x) ((x) & 0xff00)
 #define GET_PROTOCOL_MINOR(x) ((x) & 0x00ff)
 struct StoreDirConfig;
@@ -69,7 +72,7 @@ struct ServeProto
 
     static constexpr Version latest = {
         .major = 2,
-        .minor = 8,
+        .minor = 9,
     };
 
     /**
@@ -220,6 +223,8 @@ template<>
 DECLARE_SERVE_SERIALISER(UnkeyedValidPathInfo);
 template<>
 DECLARE_SERVE_SERIALISER(ServeProto::BuildOptions);
+template<>
+DECLARE_SERVE_SERIALISER(std::optional<std::chrono::microseconds>);
 
 template<typename T>
 DECLARE_SERVE_SERIALISER(std::vector<T>);

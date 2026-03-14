@@ -1,0 +1,46 @@
+[
+  {
+    "errorMsg": "something failed",
+    "isNonDeterministic": false,
+    "phaseTimings": {},
+    "pipelineTimings": null,
+    "startTime": 0,
+    "status": "MiscFailure",
+    "stopTime": 0,
+    "success": false,
+    "timesBuilt": 0
+  },
+  {
+    "builtOutputs": {
+      "out": {
+        "outPath": "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo",
+        "signatures": []
+      }
+    },
+    "cpuSystem": 604000000,
+    "cpuUser": 500000000,
+    "outputRegistrationDetail": {
+      "canonicalize": 300000,
+      "checkOutputs": 50000,
+      "move": 50000,
+      "narHash": 800000,
+      "optimise": 600000,
+      "scanReferences": 100000,
+      "sqlRegistration": 200000
+    },
+    "phaseTimings": {
+      "buildPhase": 32500000
+    },
+    "pipelineTimings": {
+      "builderExecution": 38200000,
+      "outputRegistration": 2100000,
+      "postBuildHook": 700000,
+      "sandboxSetup": 800000
+    },
+    "startTime": 30,
+    "status": "Built",
+    "stopTime": 50,
+    "success": true,
+    "timesBuilt": 1
+  }
+]

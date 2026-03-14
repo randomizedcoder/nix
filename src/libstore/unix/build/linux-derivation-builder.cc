@@ -714,6 +714,21 @@ struct ChrootLinuxDerivationBuilder : ChrootDerivationBuilder, LinuxDerivationBu
         return DerivationBuilderImpl::unprepareBuild();
     }
 
+    std::optional<ResourceSample> sampleResources() override
+    {
+        if (!cgroup)
+            return std::nullopt;
+
+        auto stats = getCgroupStats(*cgroup);
+        ResourceSample sample;
+        sample.timestamp = std::chrono::steady_clock::now();
+        sample.cpuUser = stats.cpuUser;
+        sample.cpuSystem = stats.cpuSystem;
+        sample.memoryCurrentBytes = stats.memoryCurrent;
+        sample.memoryPeakBytes = stats.memoryPeak;
+        return sample;
+    }
+
     void killSandbox(bool getStats) override
     {
         if (cgroup) {

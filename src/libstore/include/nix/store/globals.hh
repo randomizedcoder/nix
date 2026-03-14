@@ -99,11 +99,88 @@ struct NarInfoDiskCacheSettings : public virtual Config
         )"};
 };
 
+struct TelemetrySettings : public virtual Config
+{
+#if NIX_WITH_BUILD_TELEMETRY
+    Setting<bool> telemetryEnable{
+        this,
+        false,
+        "telemetry-enable",
+        R"(
+          Master switch for build process telemetry. When enabled, Nix
+          collects per-phase timing, pipeline stage timing, and resource
+          usage data during builds. This data is available via
+          `nix build --json` output, post-build hook environment variables,
+          and optionally via Prometheus `/metrics` and OTLP trace files.
+        )"};
+
+    Setting<std::string> telemetryTraceDir{
+        this,
+        "/nix/var/log/nix/traces",
+        "telemetry-trace-dir",
+        R"(
+          Directory where OTLP trace files are written. Each build
+          produces trace spans as newline-delimited JSON (OTLP format).
+          Only used when `telemetry-enable` is `true`.
+        )"};
+
+    Setting<uint64_t> telemetryTraceMaxFileSize{
+        this,
+        100 * 1024 * 1024,
+        "telemetry-trace-max-file-size",
+        R"(
+          Maximum size in bytes of a single trace file before rotation.
+          Default: 100MB (104857600).
+        )"};
+
+    Setting<unsigned int> telemetryTraceMaxFiles{
+        this,
+        10,
+        "telemetry-trace-max-files",
+        R"(
+          Maximum number of rotated trace files to keep. With the default
+          of 10 files at 100MB each, total retention is ~1GB.
+        )"};
+
+    Setting<unsigned int> telemetryBuildSamplingInterval{
+        this,
+        1,
+        "telemetry-build-sampling-interval",
+        R"(
+          Interval in seconds for sampling resource usage (CPU, memory)
+          during builds. Set to 0 to disable resource sampling.
+          Requires cgroups v2 on Linux.
+        )"};
+
+    Setting<std::string> telemetryListenAddress{
+        this,
+        "",
+        "telemetry-listen-address",
+        R"(
+          Address for the Prometheus/OTLP HTTP endpoint (e.g.
+          `127.0.0.1:9100`). When set and `telemetry-enable` is `true`,
+          exposes a `/metrics` endpoint with histogram quantiles from
+          KLL sketches.
+        )"};
+
+    Setting<std::string> telemetryOtlpEndpoint{
+        this,
+        "",
+        "telemetry-otlp-endpoint",
+        R"(
+          Optional OTLP collector endpoint URL for pushing trace data
+          (e.g. `http://localhost:4318/v1/traces`). When set, spans are
+          pushed in addition to being written to the trace file.
+        )"};
+#endif
+};
+
 class Settings : public virtual Config,
                  private LocalSettings,
                  private LogFileSettings,
                  private WorkerSettings,
-                 private NarInfoDiskCacheSettings
+                 private NarInfoDiskCacheSettings,
+                 private TelemetrySettings
 {
     StringSet getDefaultSystemFeatures();
 
@@ -166,6 +243,21 @@ public:
     {
         return *this;
     }
+
+#if NIX_WITH_BUILD_TELEMETRY
+    /**
+     * Get the telemetry settings.
+     */
+    TelemetrySettings & getTelemetrySettings()
+    {
+        return *this;
+    }
+
+    const TelemetrySettings & getTelemetrySettings() const
+    {
+        return *this;
+    }
+#endif
 
     static unsigned int getDefaultCores();
 

@@ -1,6 +1,8 @@
 {
   "errorMsg": "no idea why",
   "isNonDeterministic": false,
+  "phaseTimings": {},
+  "pipelineTimings": null,
   "startTime": 0,
   "status": "NotDeterministic",
   "stopTime": 0,

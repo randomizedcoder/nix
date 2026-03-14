@@ -3,6 +3,8 @@
     "errorMsg": "no idea why",
     "isNonDeterministic": false,
     "path": "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-xxx",
+    "phaseTimings": {},
+    "pipelineTimings": null,
     "startTime": 0,
     "status": "OutputRejected",
     "stopTime": 0,
@@ -18,6 +20,8 @@
         "out"
       ]
     },
+    "phaseTimings": {},
+    "pipelineTimings": null,
     "startTime": 30,
     "status": "NotDeterministic",
     "stopTime": 50,

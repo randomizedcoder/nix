@@ -537,6 +537,140 @@ VERSIONED_CHARACTERIZATION_TEST(
 
 VERSIONED_CHARACTERIZATION_TEST(
     WorkerProtoTest,
+    buildResult_build_telemetry,
+    "build-result-build-telemetry",
+    (WorkerProto::Version{
+        .number =
+            {
+                .major = 1,
+                .minor = 38,
+            },
+        .features = {"build-telemetry", "realisation-with-path-not-hash"},
+    }),
+    ({
+        using namespace std::literals::chrono_literals;
+        std::tuple<BuildResult, BuildResult, BuildResult> t{
+            BuildResult{.inner{BuildResult::Failure{{
+                .status = BuildResult::Failure::OutputRejected,
+                .msg = HintFmt("no idea why"),
+            }}}},
+            BuildResult{
+                .inner{BuildResult::Failure{{
+                    .status = BuildResult::Failure::NotDeterministic,
+                    .msg = HintFmt("no idea why"),
+                    .isNonDeterministic = true,
+                }}},
+                .timesBuilt = 3,
+                .startTime = 30,
+                .stopTime = 50,
+            },
+            BuildResult{
+                .inner{BuildResult::Success{
+                    .status = BuildResult::Success::Built,
+                    .builtOutputs =
+                        {
+                            {
+                                "foo",
+                                {
+                                    .outPath = StorePath{"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo"},
+                                },
+                            },
+                            {
+                                "bar",
+                                {
+                                    .outPath = StorePath{"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar"},
+                                },
+                            },
+                        },
+                }},
+                .timesBuilt = 1,
+                .startTime = 30,
+                .stopTime = 50,
+                .cpuUser = std::chrono::microseconds(500s),
+                .cpuSystem = std::chrono::microseconds(604s),
+                .phaseTimings =
+                    {
+                        {"unpackPhase", {.duration = std::chrono::microseconds(300000)}},
+                        {"buildPhase", {.duration = std::chrono::microseconds(32500000)}},
+                        {"installPhase", {.duration = std::chrono::microseconds(400000)}},
+                    },
+                .pipelineTimings =
+                    BuildResult::PipelineTimings{
+                        .sandboxSetup = std::chrono::microseconds(800000),
+                        .builderExecution = std::chrono::microseconds(38200000),
+                        .outputRegistration = std::chrono::microseconds(2100000),
+                        .postBuildHook = std::chrono::microseconds(700000),
+                    },
+            },
+        };
+        t;
+    }))
+
+VERSIONED_CHARACTERIZATION_TEST(
+    WorkerProtoTest,
+    buildResult_build_telemetry_detail,
+    "build-result-build-telemetry-detail",
+    (WorkerProto::Version{
+        .number =
+            {
+                .major = 1,
+                .minor = 38,
+            },
+        .features = {"build-telemetry", "build-telemetry-detail", "realisation-with-path-not-hash"},
+    }),
+    ({
+        using namespace std::literals::chrono_literals;
+        std::tuple<BuildResult, BuildResult> t{
+            BuildResult{.inner{BuildResult::Failure{{
+                .status = BuildResult::Failure::MiscFailure,
+                .msg = HintFmt("something failed"),
+            }}}},
+            BuildResult{
+                .inner{BuildResult::Success{
+                    .status = BuildResult::Success::Built,
+                    .builtOutputs =
+                        {
+                            {
+                                "out",
+                                {
+                                    .outPath = StorePath{"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo"},
+                                },
+                            },
+                        },
+                }},
+                .timesBuilt = 1,
+                .startTime = 30,
+                .stopTime = 50,
+                .cpuUser = std::chrono::microseconds(500s),
+                .cpuSystem = std::chrono::microseconds(604s),
+                .phaseTimings =
+                    {
+                        {"buildPhase", {.duration = std::chrono::microseconds(32500000)}},
+                    },
+                .pipelineTimings =
+                    BuildResult::PipelineTimings{
+                        .sandboxSetup = std::chrono::microseconds(800000),
+                        .builderExecution = std::chrono::microseconds(38200000),
+                        .outputRegistration = std::chrono::microseconds(2100000),
+                        .postBuildHook = std::chrono::microseconds(700000),
+                    },
+                .outputRegistrationDetail =
+                    BuildResult::OutputRegistrationDetail{
+                        .canonicalize = std::chrono::microseconds(300000),
+                        .narHash = std::chrono::microseconds(800000),
+                        .scanReferences = std::chrono::microseconds(100000),
+                        .optimise = std::chrono::microseconds(600000),
+                        .sqlRegistration = std::chrono::microseconds(200000),
+                        .move = std::chrono::microseconds(50000),
+                        .checkOutputs = std::chrono::microseconds(50000),
+                    },
+            },
+        };
+        t;
+    }))
+
+VERSIONED_CHARACTERIZATION_TEST(
+    WorkerProtoTest,
     keyedBuildResult_1_29,
     "keyed-build-result-1.29",
     (WorkerProto::Version{

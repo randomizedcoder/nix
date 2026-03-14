@@ -33,7 +33,12 @@ configdata_pub.set_quoted(
     + 'See the "system" setting for additional details',
 )
 
+build_telemetry = get_option('build-telemetry')
+
 deps_private_maybe_subproject = []
+if build_telemetry.enabled()
+  deps_private_maybe_subproject += dependency('nix-metrics')
+endif
 deps_public_maybe_subproject = [
   dependency('nix-util'),
 ]
@@ -167,6 +172,8 @@ if s3_aws_auth.enabled()
 endif
 
 configdata_pub.set('NIX_WITH_AWS_AUTH', s3_aws_auth.enabled().to_int())
+
+configdata_pub.set('NIX_WITH_BUILD_TELEMETRY', build_telemetry.enabled().to_int())
 
 subdir('nix-meson-build-support/generate-header')
 

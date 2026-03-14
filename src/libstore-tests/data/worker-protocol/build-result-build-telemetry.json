@@ -1,0 +1,54 @@
+[
+  {
+    "errorMsg": "no idea why",
+    "isNonDeterministic": false,
+    "phaseTimings": {},
+    "pipelineTimings": null,
+    "startTime": 0,
+    "status": "OutputRejected",
+    "stopTime": 0,
+    "success": false,
+    "timesBuilt": 0
+  },
+  {
+    "errorMsg": "no idea why",
+    "isNonDeterministic": true,
+    "phaseTimings": {},
+    "pipelineTimings": null,
+    "startTime": 30,
+    "status": "NotDeterministic",
+    "stopTime": 50,
+    "success": false,
+    "timesBuilt": 3
+  },
+  {
+    "builtOutputs": {
+      "bar": {
+        "outPath": "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-bar",
+        "signatures": []
+      },
+      "foo": {
+        "outPath": "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo",
+        "signatures": []
+      }
+    },
+    "cpuSystem": 604000000,
+    "cpuUser": 500000000,
+    "phaseTimings": {
+      "buildPhase": 32500000,
+      "installPhase": 400000,
+      "unpackPhase": 300000
+    },
+    "pipelineTimings": {
+      "builderExecution": 38200000,
+      "outputRegistration": 2100000,
+      "postBuildHook": 700000,
+      "sandboxSetup": 800000
+    },
+    "startTime": 30,
+    "status": "Built",
+    "stopTime": 50,
+    "success": true,
+    "timesBuilt": 1
+  }
+]

@@ -100,6 +100,49 @@ builtPathsWithResultToJSON(const std::vector<BuiltPathWithResult> & buildables, 
                 j["cpuUser"] = ((double) b.result->cpuUser->count()) / 1000000;
             if (b.result->cpuSystem)
                 j["cpuSystem"] = ((double) b.result->cpuSystem->count()) / 1000000;
+            if (!b.result->phaseTimings.empty()) {
+                nlohmann::json phases;
+                for (auto & [name, t] : b.result->phaseTimings)
+                    if (t.duration)
+                        phases[name] = ((double) t.duration->count()) / 1000000;
+                j["phaseTimings"] = std::move(phases);
+            }
+            if (b.result->pipelineTimings) {
+                nlohmann::json pt;
+                auto & p = *b.result->pipelineTimings;
+                if (p.inputSubstitution)
+                    pt["inputSubstitution"] = ((double) p.inputSubstitution->count()) / 1000000;
+                if (p.lockWait)
+                    pt["lockWait"] = ((double) p.lockWait->count()) / 1000000;
+                if (p.sandboxSetup)
+                    pt["sandboxSetup"] = ((double) p.sandboxSetup->count()) / 1000000;
+                if (p.builderExecution)
+                    pt["builderExecution"] = ((double) p.builderExecution->count()) / 1000000;
+                if (p.outputRegistration)
+                    pt["outputRegistration"] = ((double) p.outputRegistration->count()) / 1000000;
+                if (p.postBuildHook)
+                    pt["postBuildHook"] = ((double) p.postBuildHook->count()) / 1000000;
+                j["pipelineTimings"] = std::move(pt);
+            }
+            if (b.result->outputRegistrationDetail) {
+                nlohmann::json ord;
+                auto & d = *b.result->outputRegistrationDetail;
+                if (d.canonicalize)
+                    ord["canonicalize"] = ((double) d.canonicalize->count()) / 1000000;
+                if (d.narHash)
+                    ord["narHash"] = ((double) d.narHash->count()) / 1000000;
+                if (d.scanReferences)
+                    ord["scanReferences"] = ((double) d.scanReferences->count()) / 1000000;
+                if (d.optimise)
+                    ord["optimise"] = ((double) d.optimise->count()) / 1000000;
+                if (d.sqlRegistration)
+                    ord["sqlRegistration"] = ((double) d.sqlRegistration->count()) / 1000000;
+                if (d.move)
+                    ord["move"] = ((double) d.move->count()) / 1000000;
+                if (d.checkOutputs)
+                    ord["checkOutputs"] = ((double) d.checkOutputs->count()) / 1000000;
+                j["outputRegistrationDetail"] = std::move(ord);
+            }
         }
         res.push_back(j);
     }

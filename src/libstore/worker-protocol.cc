@@ -26,6 +26,12 @@ const WorkerProto::Version WorkerProto::latest = {
             std::string{
                 WorkerProto::featureRealisationWithPath,
             },
+            std::string{
+                WorkerProto::featureBuildTelemetry,
+            },
+            std::string{
+                WorkerProto::featureBuildTelemetryDetail,
+            },
         },
 };
 
@@ -262,6 +268,44 @@ BuildResult WorkerProto::Serialise<BuildResult>::read(const StoreDirConfig & sto
         res.cpuSystem = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
     }
 
+    if (conn.version.features.contains(WorkerProto::featureBuildTelemetry)) {
+        /* Phase timings: map<string, optional<microseconds>> */
+        auto numPhases = readNum<uint64_t>(conn.from);
+        for (uint64_t i = 0; i < numPhases; ++i) {
+            auto name = readString(conn.from);
+            auto dur = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.phaseTimings[name].duration = dur;
+        }
+
+        /* Pipeline timings: optional struct */
+        auto hasPipeline = readNum<uint64_t>(conn.from);
+        if (hasPipeline) {
+            BuildResult::PipelineTimings pt;
+            pt.inputSubstitution = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.lockWait = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.sandboxSetup = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.builderExecution = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.outputRegistration = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.postBuildHook = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.pipelineTimings = pt;
+        }
+    }
+
+    if (conn.version.features.contains(WorkerProto::featureBuildTelemetryDetail)) {
+        auto hasDetail = readNum<uint64_t>(conn.from);
+        if (hasDetail) {
+            BuildResult::OutputRegistrationDetail d;
+            d.canonicalize = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.narHash = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.scanReferences = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.optimise = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.sqlRegistration = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.move = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.checkOutputs = WorkerProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.outputRegistrationDetail = d;
+        }
+    }
+
     if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {
         success.builtOutputs = WorkerProto::Serialise<std::map<OutputName, UnkeyedRealisation>>::read(store, conn);
     } else if (conn.version >= WorkerProto::Version{.number = {1, 28}}) {
@@ -311,6 +355,41 @@ void WorkerProto::Serialise<BuildResult>::write(
         if (conn.version >= WorkerProto::Version{.number = {1, 37}}) {
             WorkerProto::write(store, conn, res.cpuUser);
             WorkerProto::write(store, conn, res.cpuSystem);
+        }
+
+        if (conn.version.features.contains(WorkerProto::featureBuildTelemetry)) {
+            /* Phase timings */
+            conn.to << (uint64_t) res.phaseTimings.size();
+            for (auto & [name, t] : res.phaseTimings) {
+                conn.to << name;
+                WorkerProto::write(store, conn, t.duration);
+            }
+
+            /* Pipeline timings */
+            conn.to << (uint64_t) (res.pipelineTimings ? 1 : 0);
+            if (res.pipelineTimings) {
+                auto & p = *res.pipelineTimings;
+                WorkerProto::write(store, conn, p.inputSubstitution);
+                WorkerProto::write(store, conn, p.lockWait);
+                WorkerProto::write(store, conn, p.sandboxSetup);
+                WorkerProto::write(store, conn, p.builderExecution);
+                WorkerProto::write(store, conn, p.outputRegistration);
+                WorkerProto::write(store, conn, p.postBuildHook);
+            }
+        }
+
+        if (conn.version.features.contains(WorkerProto::featureBuildTelemetryDetail)) {
+            conn.to << (uint64_t) (res.outputRegistrationDetail ? 1 : 0);
+            if (res.outputRegistrationDetail) {
+                auto & d = *res.outputRegistrationDetail;
+                WorkerProto::write(store, conn, d.canonicalize);
+                WorkerProto::write(store, conn, d.narHash);
+                WorkerProto::write(store, conn, d.scanReferences);
+                WorkerProto::write(store, conn, d.optimise);
+                WorkerProto::write(store, conn, d.sqlRegistration);
+                WorkerProto::write(store, conn, d.move);
+                WorkerProto::write(store, conn, d.checkOutputs);
+            }
         }
 
         if (conn.version.features.contains(WorkerProto::featureRealisationWithPath)) {

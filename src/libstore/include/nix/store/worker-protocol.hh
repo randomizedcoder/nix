@@ -125,6 +125,18 @@ struct WorkerProto
     static constexpr std::string_view featureRealisationWithPath = "realisation-with-path-not-hash";
 
     /**
+     * Feature for transmitting per-phase and pipeline stage timing data
+     * in `BuildResult`.
+     */
+    static constexpr std::string_view featureBuildTelemetry = "build-telemetry";
+
+    /**
+     * Feature for transmitting detailed output registration sub-operation
+     * timing data in `BuildResult`.
+     */
+    static constexpr std::string_view featureBuildTelemetryDetail = "build-telemetry-detail";
+
+    /**
      * A unidirectional read connection, to be used by the read half of the
      * canonical serializers below.
      */

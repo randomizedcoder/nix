@@ -1417,6 +1417,14 @@ void DerivationBuilderImpl::execBuilder(const Strings & args, const Strings & en
 
 SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
 {
+    using steady_clock = std::chrono::steady_clock;
+    using microseconds = std::chrono::microseconds;
+
+    BuildResult::OutputRegistrationDetail detail;
+    auto accumDur = [](std::optional<microseconds> & field, microseconds dur) {
+        field = field.value_or(microseconds{0}) + dur;
+    };
+
     std::map<std::string, ValidPathInfo> infos;
 
     /* Set of inodes seen during calls to canonicalisePathMetaData()
@@ -1511,14 +1519,18 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
         /* Canonicalise first.  This ensures that the path we're
            rewriting doesn't contain a hard link to /etc/shadow or
            something like that. */
-        canonicalisePathMetaData(
-            actualPath,
-            {
+        {
+            auto t0 = steady_clock::now();
+            canonicalisePathMetaData(
+                actualPath,
+                {
 #ifndef _WIN32
-                .uidRange = buildUser ? std::optional(buildUser->getUIDRange()) : std::nullopt,
+                    .uidRange = buildUser ? std::optional(buildUser->getUIDRange()) : std::nullopt,
 #endif
-                NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
-            inodesSeen);
+                    NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
+                inodesSeen);
+            accumDur(detail.canonicalize, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+        }
 
         bool discardReferences = false;
         if (auto udr = get(drvOptions.unsafeDiscardReferences, outputName)) {
@@ -1533,7 +1545,9 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
 
             /* Pass blank Sink as we are not ready to hash data at this stage. */
             NullSink blank;
+            auto t0 = steady_clock::now();
             references = scanForReferences(blank, actualPath, referenceablePaths);
+            accumDur(detail.scanReferences, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
         }
 
         StringSet referencedOutputs;
@@ -1636,19 +1650,27 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
                 std::filesystem::path tmpPath = actualPath.native() + ".tmp";
                 restorePath(tmpPath, *source);
                 deletePath(actualPath);
-                movePath(tmpPath, actualPath);
+                {
+                    auto t0 = steady_clock::now();
+                    movePath(tmpPath, actualPath);
+                    accumDur(detail.move, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+                }
 
                 /* FIXME: set proper permissions in restorePath() so
                    we don't have to do another traversal. */
-                canonicalisePathMetaData(
-                    actualPath,
-                    {
+                {
+                    auto t0 = steady_clock::now();
+                    canonicalisePathMetaData(
+                        actualPath,
+                        {
 #ifndef _WIN32
-                        // builder UIDs are already dealt with
-                        .uidRange = std::nullopt,
+                            // builder UIDs are already dealt with
+                            .uidRange = std::nullopt,
 #endif
-                        NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
-                    inodesSeen);
+                            NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
+                        inodesSeen);
+                    accumDur(detail.canonicalize, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+                }
             }
         };
 
@@ -1730,10 +1752,12 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
             }
 
             {
+                auto t0 = steady_clock::now();
                 HashResult narHashAndSize = hashPath(
                     {getFSSourceAccessor(), CanonPath(actualPath.native())},
                     FileSerialisationMethod::NixArchive,
                     HashAlgorithm::SHA256);
+                accumDur(detail.narHash, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
                 newInfo0.narHash = narHashAndSize.hash;
                 newInfo0.narSize = narHashAndSize.numBytesDigested;
             }
@@ -1754,10 +1778,12 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
                         outputRewrites.insert_or_assign(
                             std::string{scratchPath->hashPart()}, std::string{requiredFinalPath.hashPart()});
                     rewriteOutput(outputRewrites);
+                    auto t0 = steady_clock::now();
                     HashResult narHashAndSize = hashPath(
                         {getFSSourceAccessor(), CanonPath(actualPath.native())},
                         FileSerialisationMethod::NixArchive,
                         HashAlgorithm::SHA256);
+                    accumDur(detail.narHash, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
                     ValidPathInfo newInfo0{requiredFinalPath, {store, narHashAndSize.hash}};
                     newInfo0.narSize = narHashAndSize.numBytesDigested;
                     auto refs = rewriteRefs();
@@ -1805,15 +1831,19 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
 
         /* FIXME: set proper permissions in restorePath() so
             we don't have to do another traversal. */
-        canonicalisePathMetaData(
-            actualPath,
-            {
+        {
+            auto t0 = steady_clock::now();
+            canonicalisePathMetaData(
+                actualPath,
+                {
 #ifndef _WIN32
-                // builder UIDs are already dealt with
-                .uidRange = std::nullopt,
+                    // builder UIDs are already dealt with
+                    .uidRange = std::nullopt,
 #endif
-                NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
-            inodesSeen);
+                    NIX_WHEN_SUPPORT_ACLS(localSettings.ignoredAcls)},
+                inodesSeen);
+            accumDur(detail.canonicalize, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+        }
 
         /* Calculate where we'll move the output files. In the checking case we
            will leave leave them where they are, for now, rather than move to
@@ -1848,7 +1878,11 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
             } else {
                 auto destPath = store.toRealPath(newInfo.path);
                 deletePath(destPath);
-                movePath(actualPath, destPath);
+                {
+                    auto t0 = steady_clock::now();
+                    movePath(actualPath, destPath);
+                    accumDur(detail.move, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+                }
             }
         }
 
@@ -1892,7 +1926,9 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
                 if (!oldInfo.ultimate) {
                     oldInfo.ultimate = true;
                     store.signPathInfo(oldInfo);
+                    auto t0 = steady_clock::now();
                     store.registerValidPaths({{oldInfo.path, oldInfo}});
+                    accumDur(detail.sqlRegistration, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
                 }
             }
         } else {
@@ -1906,8 +1942,11 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
                     debug("unreferenced input: '%1%'", store.printStorePath(i));
             }
 
-            if (!store.isValidPath(newInfo.path))
+            if (!store.isValidPath(newInfo.path)) {
+                auto t0 = steady_clock::now();
                 store.optimisePath(store.toRealPath(newInfo.path), NoRepair); // FIXME: combine with scanForReferences()
+                accumDur(detail.optimise, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+            }
 
             newInfo.deriver = drvPath;
             newInfo.ultimate = true;
@@ -1925,8 +1964,11 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
                just changing the wanted hash, the redownload (or whateer
                possibly quite slow thing it was) doesn't have to be done
                again. */
-            if (newInfo.ca)
+            if (newInfo.ca) {
+                auto t0 = steady_clock::now();
                 store.registerValidPaths({{newInfo.path, newInfo}});
+                accumDur(detail.sqlRegistration, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+            }
         }
 
         /* Do this in both the check and non-check cases, because we
@@ -1937,7 +1979,11 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
 
     /* Apply output checks. This includes checking of the wanted vs got
        hash of fixed-outputs. */
-    checkOutputs(store, drvPath, drv.outputs, drvOptions.outputChecks, infos);
+    {
+        auto t0 = steady_clock::now();
+        checkOutputs(store, drvPath, drv.outputs, drvOptions.outputChecks, infos);
+        accumDur(detail.checkOutputs, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
+    }
 
     if (buildMode == bmCheck) {
         return {};
@@ -1951,7 +1997,9 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
         for (auto & [outputName, newInfo] : infos) {
             infos2.insert_or_assign(newInfo.path, newInfo);
         }
+        auto t0 = steady_clock::now();
         store.registerValidPaths(infos2);
+        accumDur(detail.sqlRegistration, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
     }
 
     /* If we made it this far, we are sure the output matches the
@@ -1975,10 +2023,14 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
         };
         if (experimentalFeatureSettings.isEnabled(Xp::CaDerivations) && !drv.type().isImpure()) {
             store.signRealisation(thisRealisation);
+            auto t0 = steady_clock::now();
             store.registerDrvOutput(thisRealisation);
+            accumDur(detail.sqlRegistration, std::chrono::duration_cast<microseconds>(steady_clock::now() - t0));
         }
         builtOutputs.emplace(outputName, thisRealisation);
     }
+
+    buildResult.outputRegistrationDetail = detail;
 
     return builtOutputs;
 }

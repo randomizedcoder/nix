@@ -318,6 +318,76 @@ VERSIONED_CHARACTERIZATION_TEST(
 
 VERSIONED_CHARACTERIZATION_TEST(
     ServeProtoTest,
+    buildResult_2_9,
+    "build-result-2.9",
+    (ServeProto::Version{
+        .major = 2,
+        .minor = 9,
+    }),
+    ({
+        using namespace std::literals::chrono_literals;
+        std::tuple<BuildResult, BuildResult> t{
+            BuildResult{
+                .inner{BuildResult::Failure{{
+                    .status = BuildResult::Failure::MiscFailure,
+                    .msg = HintFmt("something went wrong"),
+                }}},
+                .timesBuilt = 1,
+                .startTime = 10,
+                .stopTime = 20,
+                .cpuUser = std::chrono::microseconds(500000),
+                .cpuSystem = std::chrono::microseconds(200000),
+            },
+            BuildResult{
+                .inner{BuildResult::Success{
+                    .status = BuildResult::Success::Built,
+                    .builtOutputs =
+                        {
+                            {
+                                "out",
+                                {
+                                    .outPath = StorePath{"g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo"},
+                                },
+                            },
+                        },
+                }},
+                .timesBuilt = 1,
+                .startTime = 30,
+                .stopTime = 50,
+                .cpuUser = std::chrono::microseconds(3000000),
+                .cpuSystem = std::chrono::microseconds(1500000),
+                .phaseTimings =
+                    {
+                        {"unpackPhase", {.duration = std::chrono::microseconds(100000)}},
+                        {"buildPhase", {.duration = std::chrono::microseconds(15000000)}},
+                        {"installPhase", {.duration = std::chrono::microseconds(500000)}},
+                    },
+                .pipelineTimings =
+                    BuildResult::PipelineTimings{
+                        .inputSubstitution = std::chrono::microseconds(200000),
+                        .lockWait = std::chrono::microseconds(5000),
+                        .sandboxSetup = std::chrono::microseconds(300000),
+                        .builderExecution = std::chrono::microseconds(16000000),
+                        .outputRegistration = std::chrono::microseconds(400000),
+                        .postBuildHook = std::chrono::microseconds(50000),
+                    },
+                .outputRegistrationDetail =
+                    BuildResult::OutputRegistrationDetail{
+                        .canonicalize = std::chrono::microseconds(50000),
+                        .narHash = std::chrono::microseconds(150000),
+                        .scanReferences = std::chrono::microseconds(30000),
+                        .optimise = std::chrono::microseconds(80000),
+                        .sqlRegistration = std::chrono::microseconds(40000),
+                        .move = std::chrono::microseconds(20000),
+                        .checkOutputs = std::chrono::microseconds(30000),
+                    },
+            },
+        };
+        t;
+    }))
+
+VERSIONED_CHARACTERIZATION_TEST(
+    ServeProtoTest,
     unkeyedValidPathInfo_2_3,
     "unkeyed-valid-path-info-2.3",
     (ServeProto::Version{

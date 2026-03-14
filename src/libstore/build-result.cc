@@ -161,6 +161,57 @@ void adl_serializer<BuildResult>::to_json(json & res, const BuildResult & br)
         res["cpuSystem"] = br.cpuSystem->count();
     }
 
+    // Phase timings
+    {
+        json phases = json::object();
+        for (auto & [name, t] : br.phaseTimings)
+            if (t.duration)
+                phases[name] = t.duration->count();
+        res["phaseTimings"] = std::move(phases);
+    }
+
+    // Pipeline timings
+    if (br.pipelineTimings) {
+        json pt = json::object();
+        auto & p = *br.pipelineTimings;
+        if (p.inputSubstitution)
+            pt["inputSubstitution"] = p.inputSubstitution->count();
+        if (p.lockWait)
+            pt["lockWait"] = p.lockWait->count();
+        if (p.sandboxSetup)
+            pt["sandboxSetup"] = p.sandboxSetup->count();
+        if (p.builderExecution)
+            pt["builderExecution"] = p.builderExecution->count();
+        if (p.outputRegistration)
+            pt["outputRegistration"] = p.outputRegistration->count();
+        if (p.postBuildHook)
+            pt["postBuildHook"] = p.postBuildHook->count();
+        res["pipelineTimings"] = std::move(pt);
+    } else {
+        res["pipelineTimings"] = nullptr;
+    }
+
+    // Output registration detail
+    if (br.outputRegistrationDetail) {
+        json ord = json::object();
+        auto & d = *br.outputRegistrationDetail;
+        if (d.canonicalize)
+            ord["canonicalize"] = d.canonicalize->count();
+        if (d.narHash)
+            ord["narHash"] = d.narHash->count();
+        if (d.scanReferences)
+            ord["scanReferences"] = d.scanReferences->count();
+        if (d.optimise)
+            ord["optimise"] = d.optimise->count();
+        if (d.sqlRegistration)
+            ord["sqlRegistration"] = d.sqlRegistration->count();
+        if (d.move)
+            ord["move"] = d.move->count();
+        if (d.checkOutputs)
+            ord["checkOutputs"] = d.checkOutputs->count();
+        res["outputRegistrationDetail"] = std::move(ord);
+    }
+
     // Handle success or failure variant
     std::visit(
         overloaded{
@@ -195,6 +246,74 @@ BuildResult adl_serializer<BuildResult>::from_json(const json & _json)
     }
     if (auto cpuSystem = optionalValueAt(json, "cpuSystem")) {
         br.cpuSystem = std::chrono::microseconds(getUnsigned(*cpuSystem));
+    }
+
+    // Phase timings
+    if (auto phaseTimings = optionalValueAt(json, "phaseTimings")) {
+        if (phaseTimings->is_object()) {
+            auto & ptObj = getObject(*phaseTimings);
+            for (auto & [name, val] : ptObj) {
+                if (val.is_number())
+                    br.phaseTimings[name].duration = std::chrono::microseconds(val.get<int64_t>());
+            }
+        }
+    }
+
+    // Pipeline timings
+    if (auto pt = optionalValueAt(json, "pipelineTimings")) {
+        if (pt->is_object()) {
+            auto & ptObj = getObject(*pt);
+            BuildResult::PipelineTimings p;
+            if (auto v = optionalValueAt(ptObj, "inputSubstitution"))
+                if (v->is_number())
+                    p.inputSubstitution = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ptObj, "lockWait"))
+                if (v->is_number())
+                    p.lockWait = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ptObj, "sandboxSetup"))
+                if (v->is_number())
+                    p.sandboxSetup = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ptObj, "builderExecution"))
+                if (v->is_number())
+                    p.builderExecution = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ptObj, "outputRegistration"))
+                if (v->is_number())
+                    p.outputRegistration = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ptObj, "postBuildHook"))
+                if (v->is_number())
+                    p.postBuildHook = std::chrono::microseconds(v->get<int64_t>());
+            br.pipelineTimings = p;
+        }
+    }
+
+    // Output registration detail
+    if (auto ord = optionalValueAt(json, "outputRegistrationDetail")) {
+        if (ord->is_object()) {
+            auto & ordObj = getObject(*ord);
+            BuildResult::OutputRegistrationDetail d;
+            if (auto v = optionalValueAt(ordObj, "canonicalize"))
+                if (v->is_number())
+                    d.canonicalize = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "narHash"))
+                if (v->is_number())
+                    d.narHash = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "scanReferences"))
+                if (v->is_number())
+                    d.scanReferences = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "optimise"))
+                if (v->is_number())
+                    d.optimise = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "sqlRegistration"))
+                if (v->is_number())
+                    d.sqlRegistration = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "move"))
+                if (v->is_number())
+                    d.move = std::chrono::microseconds(v->get<int64_t>());
+            if (auto v = optionalValueAt(ordObj, "checkOutputs"))
+                if (v->is_number())
+                    d.checkOutputs = std::chrono::microseconds(v->get<int64_t>());
+            br.outputRegistrationDetail = d;
+        }
     }
 
     // Determine success or failure based on success field

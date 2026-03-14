@@ -125,6 +125,17 @@ struct DerivationBuilderCallbacks
 };
 
 /**
+ * A snapshot of resource usage from a running build.
+ */
+struct ResourceSample
+{
+    std::chrono::steady_clock::time_point timestamp;
+    std::optional<std::chrono::microseconds> cpuUser, cpuSystem;
+    std::optional<uint64_t> memoryCurrentBytes, memoryPeakBytes;
+    std::string currentPhase;
+};
+
+/**
  * This class represents the state for building locally.
  *
  * @todo Ideally, it would not be a class, but a single function.
@@ -181,6 +192,16 @@ struct DerivationBuilder : RestrictionContext
      * killed.
      */
     virtual bool killChild() = 0;
+
+    /**
+     * Sample current resource usage (CPU, memory) from the build's
+     * cgroup. Returns nullopt on platforms/configurations that don't
+     * support cgroup-based resource monitoring.
+     */
+    virtual std::optional<ResourceSample> sampleResources()
+    {
+        return std::nullopt;
+    }
 };
 
 /**

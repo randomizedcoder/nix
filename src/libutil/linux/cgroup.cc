@@ -73,6 +73,20 @@ CgroupStats getCgroupStats(const std::filesystem::path & cgroup)
         }
     }
 
+    auto memoryCurrentPath = cgroup / "memory.current";
+    if (pathExists(memoryCurrentPath)) {
+        auto n = string2Int<uint64_t>(trim(readFile(memoryCurrentPath)));
+        if (n)
+            stats.memoryCurrent = *n;
+    }
+
+    auto memoryPeakPath = cgroup / "memory.peak";
+    if (pathExists(memoryPeakPath)) {
+        auto n = string2Int<uint64_t>(trim(readFile(memoryPeakPath)));
+        if (n)
+            stats.memoryPeak = *n;
+    }
+
     return stats;
 }
 

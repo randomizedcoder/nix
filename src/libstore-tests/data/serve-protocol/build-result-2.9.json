@@ -1,0 +1,52 @@
+[
+  {
+    "cpuSystem": 200000,
+    "cpuUser": 500000,
+    "errorMsg": "something went wrong",
+    "isNonDeterministic": false,
+    "phaseTimings": {},
+    "pipelineTimings": null,
+    "startTime": 10,
+    "status": "MiscFailure",
+    "stopTime": 20,
+    "success": false,
+    "timesBuilt": 1
+  },
+  {
+    "builtOutputs": {
+      "out": {
+        "outPath": "g1w7hy3qg1w7hy3qg1w7hy3qg1w7hy3q-foo",
+        "signatures": []
+      }
+    },
+    "cpuSystem": 1500000,
+    "cpuUser": 3000000,
+    "outputRegistrationDetail": {
+      "canonicalize": 50000,
+      "checkOutputs": 30000,
+      "move": 20000,
+      "narHash": 150000,
+      "optimise": 80000,
+      "scanReferences": 30000,
+      "sqlRegistration": 40000
+    },
+    "phaseTimings": {
+      "buildPhase": 15000000,
+      "installPhase": 500000,
+      "unpackPhase": 100000
+    },
+    "pipelineTimings": {
+      "builderExecution": 16000000,
+      "inputSubstitution": 200000,
+      "lockWait": 5000,
+      "outputRegistration": 400000,
+      "postBuildHook": 50000,
+      "sandboxSetup": 300000
+    },
+    "startTime": 30,
+    "status": "Built",
+    "stopTime": 50,
+    "success": true,
+    "timesBuilt": 1
+  }
+]

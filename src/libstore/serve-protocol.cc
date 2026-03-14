@@ -9,11 +9,39 @@
 #include "nix/store/path-info.hh"
 #include "nix/util/json-utils.hh"
 
+#include <chrono>
 #include <nlohmann/json.hpp>
 
 namespace nix {
 
 /* protocol-specific definitions */
+
+std::optional<std::chrono::microseconds> ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(
+    const StoreDirConfig & store, ServeProto::ReadConn conn)
+{
+    auto tag = readNum<uint8_t>(conn.from);
+    switch (tag) {
+    case 0:
+        return std::nullopt;
+    case 1:
+        return std::optional<std::chrono::microseconds>{std::chrono::microseconds(readNum<int64_t>(conn.from))};
+    default:
+        throw Error("Invalid optional tag from remote");
+    }
+}
+
+void ServeProto::Serialise<std::optional<std::chrono::microseconds>>::write(
+    const StoreDirConfig & store,
+    ServeProto::WriteConn conn,
+    const std::optional<std::chrono::microseconds> & optDuration)
+{
+    if (!optDuration.has_value()) {
+        conn.to << (uint8_t) 0;
+    } else {
+        conn.to << (uint8_t) 1;
+        conn.to << (int64_t) optDuration->count();
+    }
+}
 
 BuildResult ServeProto::Serialise<BuildResult>::read(const StoreDirConfig & store, ServeProto::ReadConn conn)
 {
@@ -41,6 +69,46 @@ BuildResult ServeProto::Serialise<BuildResult>::read(const StoreDirConfig & stor
                 output.substr(n + 1),
                 UnkeyedRealisation{
                     StorePath{getString(valueAt(getObject(nlohmann::json::parse(realisation)), "outPath"))}});
+        }
+    }
+
+    if (conn.version >= ServeProto::Version{2, 9}) {
+        res.cpuUser = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+        res.cpuSystem = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+
+        /* Phase timings */
+        auto numPhases = readNum<uint64_t>(conn.from);
+        for (uint64_t i = 0; i < numPhases; ++i) {
+            auto name = readString(conn.from);
+            auto dur = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.phaseTimings[name].duration = dur;
+        }
+
+        /* Pipeline timings */
+        auto hasPipeline = readNum<uint64_t>(conn.from);
+        if (hasPipeline) {
+            BuildResult::PipelineTimings pt;
+            pt.inputSubstitution = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.lockWait = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.sandboxSetup = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.builderExecution = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.outputRegistration = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            pt.postBuildHook = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.pipelineTimings = pt;
+        }
+
+        /* Output registration detail */
+        auto hasDetail = readNum<uint64_t>(conn.from);
+        if (hasDetail) {
+            BuildResult::OutputRegistrationDetail d;
+            d.canonicalize = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.narHash = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.scanReferences = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.optimise = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.sqlRegistration = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.move = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            d.checkOutputs = ServeProto::Serialise<std::optional<std::chrono::microseconds>>::read(store, conn);
+            res.outputRegistrationDetail = d;
         }
     }
 
@@ -94,6 +162,43 @@ void ServeProto::Serialise<BuildResult>::write(
                 sm[dummyId] = j.dump();
             }
             ServeProto::write(store, conn, sm);
+        }
+
+        if (conn.version >= ServeProto::Version{2, 9}) {
+            ServeProto::write(store, conn, res.cpuUser);
+            ServeProto::write(store, conn, res.cpuSystem);
+
+            /* Phase timings */
+            conn.to << (uint64_t) res.phaseTimings.size();
+            for (auto & [name, t] : res.phaseTimings) {
+                conn.to << name;
+                ServeProto::write(store, conn, t.duration);
+            }
+
+            /* Pipeline timings */
+            conn.to << (uint64_t) (res.pipelineTimings ? 1 : 0);
+            if (res.pipelineTimings) {
+                auto & p = *res.pipelineTimings;
+                ServeProto::write(store, conn, p.inputSubstitution);
+                ServeProto::write(store, conn, p.lockWait);
+                ServeProto::write(store, conn, p.sandboxSetup);
+                ServeProto::write(store, conn, p.builderExecution);
+                ServeProto::write(store, conn, p.outputRegistration);
+                ServeProto::write(store, conn, p.postBuildHook);
+            }
+
+            /* Output registration detail */
+            conn.to << (uint64_t) (res.outputRegistrationDetail ? 1 : 0);
+            if (res.outputRegistrationDetail) {
+                auto & d = *res.outputRegistrationDetail;
+                ServeProto::write(store, conn, d.canonicalize);
+                ServeProto::write(store, conn, d.narHash);
+                ServeProto::write(store, conn, d.scanReferences);
+                ServeProto::write(store, conn, d.optimise);
+                ServeProto::write(store, conn, d.sqlRegistration);
+                ServeProto::write(store, conn, d.move);
+                ServeProto::write(store, conn, d.checkOutputs);
+            }
         }
     };
 

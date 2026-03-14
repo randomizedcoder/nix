@@ -16,7 +16,12 @@
 #include "nix/store/local-store.hh" // TODO remove, along with remaining downcasts
 #include "nix/store/globals.hh"
 
+#if NIX_WITH_BUILD_TELEMETRY
+#  include "nix/metrics/build-metrics.hh"
+#endif
+
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -70,12 +75,16 @@ static void runPostBuildHook(
     const StoreDirConfig & store,
     Logger & logger,
     const StorePath & drvPath,
-    const StorePathSet & outputPaths);
+    const StorePathSet & outputPaths,
+    const BuildResult & buildResult);
 
 /* At least one of the output paths could not be
    produced using a substitute.  So we have to build instead. */
 Goal::Co DerivationBuildingGoal::gaveUpOnSubstitution(bool storeDerivation)
 {
+    using steady_clock = std::chrono::steady_clock;
+    using microseconds = std::chrono::microseconds;
+
     Goals waitees;
 
     /* Copy the input sources from the eval store to the build
@@ -102,7 +111,18 @@ Goal::Co DerivationBuildingGoal::gaveUpOnSubstitution(bool storeDerivation)
         waitees.insert(upcast_goal(worker.makePathSubstitutionGoal(i)));
     }
 
+    auto inputSubStart = steady_clock::now();
     co_await await(std::move(waitees));
+    auto inputSubDur = std::chrono::duration_cast<microseconds>(steady_clock::now() - inputSubStart);
+    /* Store input substitution time for later use in pipelineTimings.
+       We initialize pipelineTimings here; buildLocally/buildWithHook will
+       populate the remaining fields and set buildResult.pipelineTimings. */
+    if (!buildResult.pipelineTimings)
+        buildResult.pipelineTimings = BuildResult::PipelineTimings{};
+    buildResult.pipelineTimings->inputSubstitution = inputSubDur;
+#if NIX_WITH_BUILD_TELEMETRY
+    metrics::pipelineStageSeconds.update("inputSubstitution", inputSubDur);
+#endif
 
     trace("all inputs realised");
 
@@ -365,6 +385,9 @@ Goal::Co DerivationBuildingGoal::tryToBuild(StorePathSet inputPaths)
     }();
 
     auto acquireResources = [&](bool & done, PathLocks & outputLocks) -> Goal::Co {
+        using steady_clock = std::chrono::steady_clock;
+        using microseconds = std::chrono::microseconds;
+
         trace("trying to build");
 
         /**
@@ -397,6 +420,7 @@ Goal::Co DerivationBuildingGoal::tryToBuild(StorePathSet inputPaths)
             }
         }
 
+        auto lockWaitStart = steady_clock::now();
         if (!outputLocks.lockPaths(lockFiles, "", false)) {
             Activity act(
                 *logger,
@@ -411,6 +435,13 @@ Goal::Co DerivationBuildingGoal::tryToBuild(StorePathSet inputPaths)
                 co_await waitForAWhile();
             } while (!outputLocks.lockPaths(lockFiles, "", false));
         }
+        auto lockWaitDur = std::chrono::duration_cast<microseconds>(steady_clock::now() - lockWaitStart);
+        if (!buildResult.pipelineTimings)
+            buildResult.pipelineTimings = BuildResult::PipelineTimings{};
+        buildResult.pipelineTimings->lockWait = lockWaitDur;
+#if NIX_WITH_BUILD_TELEMETRY
+        metrics::pipelineStageSeconds.update("lockWait", lockWaitDur);
+#endif
 
         /* Now check again whether the outputs are valid.  This is because
            another process may have started building in parallel.  After
@@ -579,6 +610,13 @@ Goal::Co DerivationBuildingGoal::buildWithHook(
 #ifdef _WIN32 // TODO enable build hook on Windows
     unreachable();
 #else
+    using steady_clock = std::chrono::steady_clock;
+    using microseconds = std::chrono::microseconds;
+
+    /* Phase timing state for remote builds */
+    std::string currentPhase;
+    steady_clock::time_point currentPhaseStart;
+
     std::unique_ptr<HookInstance> hook = std::move(worker.hook);
 
     /* Set up callback so childTerminated is called if the hook is
@@ -642,8 +680,24 @@ Goal::Co DerivationBuildingGoal::buildWithHook(
     mcRunningBuilds = std::make_unique<MaintainCount<uint64_t>>(worker.runningBuilds);
     worker.updateProgress();
 
+    /* Set up phase timing callback for remote builds */
+    buildLog->onPhaseChange = [&](const std::string & phase) {
+        auto now = steady_clock::now();
+        if (!currentPhase.empty()) {
+            auto dur = std::chrono::duration_cast<microseconds>(now - currentPhaseStart);
+            buildResult.phaseTimings[currentPhase].duration = dur;
+#if NIX_WITH_BUILD_TELEMETRY
+            metrics::buildPhaseSeconds.update(currentPhase, dur);
+#endif
+            buildLog->act->result(resPhaseTiming, currentPhase, (uint64_t) dur.count());
+        }
+        currentPhase = phase;
+        currentPhaseStart = now;
+    };
+
     std::string currentHookLine;
     uint64_t logSize = 0;
+    auto builderExecStart = steady_clock::now();
 
     while (true) {
         auto event = co_await WaitForChildEvent{};
@@ -664,6 +718,26 @@ Goal::Co DerivationBuildingGoal::buildWithHook(
                     if (c == '\n') {
                         auto json = parseJSONMessage(currentHookLine, "the derivation builder");
                         if (json) {
+                            /* Detect phase changes from hook protocol messages */
+                            {
+                                auto typeIt = json->find("type");
+                                auto fieldsIt = json->find("fields");
+                                if (typeIt != json->end() && *typeIt == resSetPhase && fieldsIt != json->end()
+                                    && !fieldsIt->is_null() && fieldsIt->size() > 0 && !(*fieldsIt)[0].is_null()) {
+                                    auto phase = (*fieldsIt)[0].get<std::string>();
+                                    auto now = steady_clock::now();
+                                    if (!currentPhase.empty()) {
+                                        auto dur = std::chrono::duration_cast<microseconds>(now - currentPhaseStart);
+                                        buildResult.phaseTimings[currentPhase].duration = dur;
+#if NIX_WITH_BUILD_TELEMETRY
+                                        metrics::buildPhaseSeconds.update(currentPhase, dur);
+#endif
+                                        buildLog->act->result(resPhaseTiming, currentPhase, (uint64_t) dur.count());
+                                    }
+                                    currentPhase = phase;
+                                    currentPhaseStart = now;
+                                }
+                            }
                             auto s = handleJSONLogMessage(
                                 *json, worker.act, hook->activities, "the derivation builder", true);
                             // ensure that logs from a builder using `ssh-ng://` as protocol
@@ -704,7 +778,31 @@ Goal::Co DerivationBuildingGoal::buildWithHook(
         }
     }
 
+    /* Finalize last phase timing */
+    if (!currentPhase.empty()) {
+        auto now = steady_clock::now();
+        auto dur = std::chrono::duration_cast<microseconds>(now - currentPhaseStart);
+        buildResult.phaseTimings[currentPhase].duration = dur;
+#if NIX_WITH_BUILD_TELEMETRY
+        metrics::buildPhaseSeconds.update(currentPhase, dur);
+#endif
+        buildLog->act->result(resPhaseTiming, currentPhase, (uint64_t) dur.count());
+    }
+
     trace("hook build done");
+
+    auto hookBuildEnd = steady_clock::now();
+
+    /* Carry over inputSubstitution and lockWait from earlier pipeline stages */
+    BuildResult::PipelineTimings hookPipelineTimings =
+        buildResult.pipelineTimings.value_or(BuildResult::PipelineTimings{});
+    hookPipelineTimings.builderExecution = std::chrono::duration_cast<microseconds>(hookBuildEnd - builderExecStart);
+
+#if NIX_WITH_BUILD_TELEMETRY
+    metrics::pipelineStageSeconds.update("builderExecution", *hookPipelineTimings.builderExecution);
+#endif
+    buildLog->act->result(resPipelineTiming, "builderExecution",
+        (uint64_t) hookPipelineTimings.builderExecution->count());
 
     /* Since we got an EOF on the logger pipe, the builder is presumed
        to have terminated.  In fact, the builder could also have
@@ -761,7 +859,20 @@ Goal::Co DerivationBuildingGoal::buildWithHook(
     StorePathSet outputPaths;
     for (auto & [_, output] : builtOutputs)
         outputPaths.insert(output.outPath);
-    runPostBuildHook(worker.settings, worker.store, *logger, drvPath, outputPaths);
+
+    {
+        auto hookStart = steady_clock::now();
+        runPostBuildHook(worker.settings, worker.store, *logger, drvPath, outputPaths, buildResult);
+        auto hookEnd = steady_clock::now();
+        hookPipelineTimings.postBuildHook = std::chrono::duration_cast<microseconds>(hookEnd - hookStart);
+#if NIX_WITH_BUILD_TELEMETRY
+        metrics::pipelineStageSeconds.update("postBuildHook", *hookPipelineTimings.postBuildHook);
+#endif
+        buildLog->act->result(resPipelineTiming, "postBuildHook",
+            (uint64_t) hookPipelineTimings.postBuildHook->count());
+    }
+
+    buildResult.pipelineTimings = hookPipelineTimings;
 
     /* It is now safe to delete the lock files, since all future
        lockers will see that the output paths are valid; they will
@@ -786,6 +897,17 @@ Goal::Co DerivationBuildingGoal::buildLocally(
 #ifdef _WIN32 // TODO enable `DerivationBuilder` on Windows
     throw UnimplementedError("building derivations is not yet implemented on Windows");
 #else
+    using steady_clock = std::chrono::steady_clock;
+    using microseconds = std::chrono::microseconds;
+
+    /* Carry over inputSubstitution and lockWait from earlier pipeline stages */
+    BuildResult::PipelineTimings pipelineTimings_ =
+        buildResult.pipelineTimings.value_or(BuildResult::PipelineTimings{});
+
+    /* Phase timing state */
+    std::string currentPhase;
+    steady_clock::time_point currentPhaseStart;
+
     std::unique_ptr<BuildLog> buildLog;
     std::unique_ptr<LogFile> logFile;
 
@@ -915,17 +1037,26 @@ Goal::Co DerivationBuildingGoal::buildLocally(
                                 std::move(params));
         }
 
-        if (auto builderOutOpt = builder->startBuild()) {
-            builderOut = *std::move(builderOutOpt);
-        } else {
-            if (!actLock)
-                actLock = std::make_unique<Activity>(
-                    *logger,
-                    lvlWarn,
-                    actBuildWaiting,
-                    fmt("waiting for a free build user ID for '%s'", Magenta(worker.store.printStorePath(drvPath))));
-            co_await waitForAWhile();
-            continue;
+        {
+            auto sandboxStart = steady_clock::now();
+            if (auto builderOutOpt = builder->startBuild()) {
+                builderOut = *std::move(builderOutOpt);
+                auto sandboxEnd = steady_clock::now();
+                pipelineTimings_.sandboxSetup = std::chrono::duration_cast<microseconds>(sandboxEnd - sandboxStart);
+#if NIX_WITH_BUILD_TELEMETRY
+                metrics::pipelineStageSeconds.update("sandboxSetup", *pipelineTimings_.sandboxSetup);
+#endif
+            } else {
+                if (!actLock)
+                    actLock = std::make_unique<Activity>(
+                        *logger,
+                        lvlWarn,
+                        actBuildWaiting,
+                        fmt("waiting for a free build user ID for '%s'",
+                            Magenta(worker.store.printStorePath(drvPath))));
+                co_await waitForAWhile();
+                continue;
+            }
         }
 
         break;
@@ -937,6 +1068,38 @@ Goal::Co DerivationBuildingGoal::buildLocally(
 
     started();
 
+    /* Emit pipeline timings that were measured before buildLog was created */
+    if (pipelineTimings_.inputSubstitution)
+        buildLog->act->result(resPipelineTiming, "inputSubstitution",
+            (uint64_t) pipelineTimings_.inputSubstitution->count());
+    if (pipelineTimings_.lockWait)
+        buildLog->act->result(resPipelineTiming, "lockWait",
+            (uint64_t) pipelineTimings_.lockWait->count());
+    if (pipelineTimings_.sandboxSetup)
+        buildLog->act->result(resPipelineTiming, "sandboxSetup",
+            (uint64_t) pipelineTimings_.sandboxSetup->count());
+
+    /* Set up phase timing callback */
+    buildLog->onPhaseChange = [&](const std::string & phase) {
+        auto now = steady_clock::now();
+        if (!currentPhase.empty()) {
+            auto dur = std::chrono::duration_cast<microseconds>(now - currentPhaseStart);
+            buildResult.phaseTimings[currentPhase].duration = dur;
+#if NIX_WITH_BUILD_TELEMETRY
+            metrics::buildPhaseSeconds.update(currentPhase, dur);
+#endif
+            buildLog->act->result(resPhaseTiming, currentPhase, (uint64_t) dur.count());
+        }
+        currentPhase = phase;
+        currentPhaseStart = now;
+    };
+
+    auto builderExecStart = steady_clock::now();
+#if NIX_WITH_BUILD_TELEMETRY
+    auto lastSample = builderExecStart;
+    auto samplingIntervalSecs = settings.getTelemetrySettings().telemetryBuildSamplingInterval.get();
+    auto sampleInterval = std::chrono::seconds(samplingIntervalSecs);
+#endif
     uint64_t logSize = 0;
 
     while (true) {
@@ -952,6 +1115,21 @@ Goal::Co DerivationBuildingGoal::buildLocally(
                 if (logFile->sink)
                     (*logFile->sink)(output->data);
             }
+
+#if NIX_WITH_BUILD_TELEMETRY
+            /* Periodic resource sampling */
+            auto now = steady_clock::now();
+            if (samplingIntervalSecs > 0 && now - lastSample >= sampleInterval) {
+                if (auto sample = builder->sampleResources()) {
+                    sample->currentPhase = currentPhase;
+                    if (sample->memoryCurrentBytes) {
+                        auto label = currentPhase.empty() ? "unknown" : currentPhase;
+                        metrics::buildMemoryBytes.updateRaw(label, static_cast<double>(*sample->memoryCurrentBytes));
+                    }
+                }
+                lastSample = now;
+            }
+#endif
         } else if (std::get_if<ChildEOF>(&event)) {
             buildLog->flush();
             break;
@@ -961,19 +1139,63 @@ Goal::Co DerivationBuildingGoal::buildLocally(
         }
     }
 
+    /* Finalize last phase timing */
+    if (!currentPhase.empty()) {
+        auto now = steady_clock::now();
+        auto dur = std::chrono::duration_cast<microseconds>(now - currentPhaseStart);
+        buildResult.phaseTimings[currentPhase].duration = dur;
+#if NIX_WITH_BUILD_TELEMETRY
+        metrics::buildPhaseSeconds.update(currentPhase, dur);
+#endif
+        buildLog->act->result(resPhaseTiming, currentPhase, (uint64_t) dur.count());
+    }
+
+    auto builderExecEnd = steady_clock::now();
+    pipelineTimings_.builderExecution = std::chrono::duration_cast<microseconds>(builderExecEnd - builderExecStart);
+#if NIX_WITH_BUILD_TELEMETRY
+    metrics::pipelineStageSeconds.update("builderExecution", *pipelineTimings_.builderExecution);
+#endif
+    buildLog->act->result(resPipelineTiming, "builderExecution",
+        (uint64_t) pipelineTimings_.builderExecution->count());
+
     trace("build done");
 
     SingleDrvOutputs builtOutputs;
-    try {
-        builtOutputs = builder->unprepareBuild();
-    } catch (BuilderFailureError & e) {
-        builder.reset();
-        outputLocks.unlock();
-        co_return doneFailure(fixupBuilderFailureErrorMessage(std::move(e), *buildLog));
-    } catch (BuildError & e) {
-        builder.reset();
-        outputLocks.unlock();
-        co_return doneFailure(std::move(e));
+    {
+        auto outputRegStart = steady_clock::now();
+        try {
+            builtOutputs = builder->unprepareBuild();
+        } catch (BuilderFailureError & e) {
+            builder.reset();
+            outputLocks.unlock();
+            co_return doneFailure(fixupBuilderFailureErrorMessage(std::move(e), *buildLog));
+        } catch (BuildError & e) {
+            builder.reset();
+            outputLocks.unlock();
+            co_return doneFailure(std::move(e));
+        }
+        auto outputRegEnd = steady_clock::now();
+        pipelineTimings_.outputRegistration = std::chrono::duration_cast<microseconds>(outputRegEnd - outputRegStart);
+#if NIX_WITH_BUILD_TELEMETRY
+        metrics::pipelineStageSeconds.update("outputRegistration", *pipelineTimings_.outputRegistration);
+#endif
+        buildLog->act->result(resPipelineTiming, "outputRegistration",
+            (uint64_t) pipelineTimings_.outputRegistration->count());
+
+        /* Emit output registration detail timing via Activity */
+        if (buildResult.outputRegistrationDetail) {
+            auto & d = *buildResult.outputRegistrationDetail;
+            auto emit = [&](const char * name, const auto & val) {
+                if (val) buildLog->act->result(resOutputRegDetail, name, (uint64_t) val->count());
+            };
+            emit("canonicalize", d.canonicalize);
+            emit("narHash", d.narHash);
+            emit("scanReferences", d.scanReferences);
+            emit("optimise", d.optimise);
+            emit("sqlRegistration", d.sqlRegistration);
+            emit("move", d.move);
+            emit("checkOutputs", d.checkOutputs);
+        }
     }
     {
         builder.reset();
@@ -991,7 +1213,20 @@ Goal::Co DerivationBuildingGoal::buildLocally(
             worker.markContentsGood(output.outPath);
             outputPaths.insert(output.outPath);
         }
-        runPostBuildHook(worker.settings, worker.store, *logger, drvPath, outputPaths);
+
+        {
+            auto hookStart = steady_clock::now();
+            runPostBuildHook(worker.settings, worker.store, *logger, drvPath, outputPaths, buildResult);
+            auto hookEnd = steady_clock::now();
+            pipelineTimings_.postBuildHook = std::chrono::duration_cast<microseconds>(hookEnd - hookStart);
+#if NIX_WITH_BUILD_TELEMETRY
+            metrics::pipelineStageSeconds.update("postBuildHook", *pipelineTimings_.postBuildHook);
+#endif
+            buildLog->act->result(resPipelineTiming, "postBuildHook",
+                (uint64_t) pipelineTimings_.postBuildHook->count());
+        }
+
+        buildResult.pipelineTimings = pipelineTimings_;
 
         /* It is now safe to delete the lock files, since all future
            lockers will see that the output paths are valid; they will
@@ -1009,7 +1244,8 @@ static void runPostBuildHook(
     const StoreDirConfig & store,
     Logger & logger,
     const StorePath & drvPath,
-    const StorePathSet & outputPaths)
+    const StorePathSet & outputPaths,
+    const BuildResult & buildResult)
 {
     auto hook = workerSettings.postBuildHook;
     if (hook == "")
@@ -1028,6 +1264,44 @@ static void runPostBuildHook(
     hookEnvironment.emplace(
         OS_STR("OUT_PATHS"), string_to_os_string(chomp(concatStringsSep(" ", store.printStorePathSet(outputPaths)))));
     hookEnvironment.emplace(OS_STR("NIX_CONFIG"), string_to_os_string(globalConfig.toKeyValue()));
+
+    /* Enriched timing data for post-build hook consumers */
+    if (buildResult.startTime)
+        hookEnvironment.emplace(
+            OS_STR("NIX_BUILD_START_TIME"), string_to_os_string(std::to_string(buildResult.startTime)));
+    if (buildResult.stopTime)
+        hookEnvironment.emplace(
+            OS_STR("NIX_BUILD_STOP_TIME"), string_to_os_string(std::to_string(buildResult.stopTime)));
+    if (buildResult.cpuUser)
+        hookEnvironment.emplace(
+            OS_STR("NIX_BUILD_CPU_USER_USEC"), string_to_os_string(std::to_string(buildResult.cpuUser->count())));
+    if (buildResult.cpuSystem)
+        hookEnvironment.emplace(
+            OS_STR("NIX_BUILD_CPU_SYSTEM_USEC"), string_to_os_string(std::to_string(buildResult.cpuSystem->count())));
+    if (!buildResult.phaseTimings.empty()) {
+        nlohmann::json phases;
+        for (auto & [name, t] : buildResult.phaseTimings)
+            if (t.duration)
+                phases[name] = t.duration->count();
+        hookEnvironment.emplace(OS_STR("NIX_BUILD_PHASE_TIMINGS"), string_to_os_string(phases.dump()));
+    }
+    if (buildResult.pipelineTimings) {
+        nlohmann::json pt;
+        auto & p = *buildResult.pipelineTimings;
+        if (p.inputSubstitution)
+            pt["inputSubstitution"] = p.inputSubstitution->count();
+        if (p.lockWait)
+            pt["lockWait"] = p.lockWait->count();
+        if (p.sandboxSetup)
+            pt["sandboxSetup"] = p.sandboxSetup->count();
+        if (p.builderExecution)
+            pt["builderExecution"] = p.builderExecution->count();
+        if (p.outputRegistration)
+            pt["outputRegistration"] = p.outputRegistration->count();
+        if (p.postBuildHook)
+            pt["postBuildHook"] = p.postBuildHook->count();
+        hookEnvironment.emplace(OS_STR("NIX_BUILD_PIPELINE_TIMINGS"), string_to_os_string(pt.dump()));
+    }
 
     struct LogSink : Sink
     {

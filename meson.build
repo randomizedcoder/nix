@@ -14,6 +14,9 @@ project(
 
 # Internal Libraries
 subproject('libutil')
+if get_option('build-telemetry').enabled()
+  subproject('libmetrics')
+endif
 subproject('libstore')
 subproject('libfetchers')
 subproject('libexpr')

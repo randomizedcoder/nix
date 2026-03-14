@@ -1,9 +1,10 @@
 #pragma once
 ///@file
 
-#include <string>
 #include <chrono>
+#include <map>
 #include <optional>
+#include <string>
 
 #include "nix/store/derived-path.hh"
 #include "nix/store/realisation.hh"
@@ -189,6 +190,60 @@ struct BuildResult
      * User and system CPU time the build took.
      */
     std::optional<std::chrono::microseconds> cpuUser, cpuSystem;
+
+    /**
+     * Duration of each stdenv build phase (e.g. unpackPhase, buildPhase,
+     * installPhase). Populated from @nix {"action":"setPhase"} messages.
+     */
+    struct PhaseTiming
+    {
+        std::optional<std::chrono::microseconds> duration;
+
+        bool operator==(const PhaseTiming &) const noexcept = default;
+        std::strong_ordering operator<=>(const PhaseTiming &) const noexcept = default;
+    };
+
+    std::map<std::string, PhaseTiming> phaseTimings;
+
+    /**
+     * Timing of each stage in the Nix build pipeline surrounding the
+     * actual builder execution.
+     */
+    struct PipelineTimings
+    {
+        std::optional<std::chrono::microseconds> inputSubstitution;
+        std::optional<std::chrono::microseconds> lockWait;
+        std::optional<std::chrono::microseconds> sandboxSetup;
+        std::optional<std::chrono::microseconds> builderExecution;
+        std::optional<std::chrono::microseconds> outputRegistration;
+        std::optional<std::chrono::microseconds> postBuildHook;
+
+        bool operator==(const PipelineTimings &) const noexcept = default;
+        std::strong_ordering operator<=>(const PipelineTimings &) const noexcept = default;
+    };
+
+    std::optional<PipelineTimings> pipelineTimings;
+
+    /**
+     * Detailed timing breakdown of the output registration phase.
+     * Each field measures time spent in a specific sub-operation
+     * within registerOutputs().
+     */
+    struct OutputRegistrationDetail
+    {
+        std::optional<std::chrono::microseconds> canonicalize;
+        std::optional<std::chrono::microseconds> narHash;
+        std::optional<std::chrono::microseconds> scanReferences;
+        std::optional<std::chrono::microseconds> optimise;
+        std::optional<std::chrono::microseconds> sqlRegistration;
+        std::optional<std::chrono::microseconds> move;
+        std::optional<std::chrono::microseconds> checkOutputs;
+
+        bool operator==(const OutputRegistrationDetail &) const noexcept = default;
+        std::strong_ordering operator<=>(const OutputRegistrationDetail &) const noexcept = default;
+    };
+
+    std::optional<OutputRegistrationDetail> outputRegistrationDetail;
 
     bool operator==(const BuildResult &) const noexcept;
     std::strong_ordering operator<=>(const BuildResult &) const noexcept;

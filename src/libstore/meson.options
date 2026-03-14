@@ -39,3 +39,9 @@ option(
   type : 'feature',
   description : 'build support for AWS authentication with S3',
 )
+
+option(
+  'build-telemetry',
+  type : 'feature',
+  description : 'build support for build process telemetry (histograms, trace files)',
+)
