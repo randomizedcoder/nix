@@ -24,6 +24,8 @@ deps_public_maybe_subproject = [
 ]
 subdir('nix-meson-build-support/subprojects')
 
+subdir('nix-meson-build-support/common')
+
 sources = files(
   'build-metrics.cc',
 )
@@ -37,7 +39,7 @@ headers = files(
 this_library = library(
   'nixmetrics',
   sources,
-  dependencies : deps_public + deps_private,
+  dependencies : deps_public + deps_private + deps_other,
   include_directories : include_dirs,
   install : true,
 )
@@ -46,15 +48,4 @@ install_headers(headers, subdir : 'nix/metrics', preserve_path : false)
 
 libraries_private = []
 
-import('pkgconfig').generate(
-  this_library,
-  name : 'Nix',
-  subdirs : ['nix'],
-  description : 'Nix Build Telemetry Metrics',
-  libraries_private : libraries_private,
-)
-
-meson.override_dependency('nix-metrics', declare_dependency(
-  include_directories : include_dirs,
-  link_with : this_library,
-))
+subdir('nix-meson-build-support/export')
