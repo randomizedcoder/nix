@@ -299,6 +299,7 @@ sources = files(
   'builtins/buildenv.cc',
   'builtins/fetchurl.cc',
   'builtins/unpack-channel.cc',
+  'canonicalizing-source-accessor.cc',
   'common-protocol.cc',
   'common-ssh-store-config.cc',
   'content-address.cc',
