@@ -7,6 +7,7 @@
 #include "nix/util/file-system.hh"
 #include "nix/util/hash.hh"
 #include "nix/util/posix-source-accessor.hh"
+#include "nix/util/serialise.hh"
 
 #ifndef _WIN32
 
@@ -56,7 +57,13 @@ static std::filesystem::path createTestTree(const std::filesystem::path & parent
     return root;
 }
 
-static void BM_TwoPass_CanonicalizeAndScan(benchmark::State & state)
+/**
+ * Simulates master's 3-pass output registration pipeline:
+ *   Pass 1: canonicalisePathMetaData() — separate walk (lstat + chmod + lchown + utimes)
+ *   Pass 2: scanForReferences(NullSink) — scan walk with hash DISCARDED
+ *   Pass 3: dumpPath() into HashSink — third full tree walk recomputing the NAR hash
+ */
+static void BM_ThreePass_Master(benchmark::State & state)
 {
     const int fileCount = state.range(0);
     StorePathSet emptyRefs;
@@ -67,10 +74,52 @@ static void BM_TwoPass_CanonicalizeAndScan(benchmark::State & state)
         auto root = createTestTree(tmpDir, fileCount);
         state.ResumeTiming();
 
+        // Pass 1: Separate canonicalize walk
         InodesSeen inodesSeen;
         CanonicalizePathMetadataOptions options BENCH_CANON_OPTIONS;
         canonicalisePathMetaData(root, options, inodesSeen);
 
+        // Pass 2: Scan for references (hash DISCARDED — master used NullSink)
+        NullSink nullSink;
+        scanForReferences(nullSink, root, emptyRefs);
+
+        // Pass 3: Separate hash computation (third full tree walk)
+        HashSink narHashSink{HashAlgorithm::SHA256};
+        dumpPath(root, narHashSink);
+        auto hash = narHashSink.finish();
+        benchmark::DoNotOptimize(hash);
+
+        state.PauseTiming();
+        makeTreeDeletable(tmpDir);
+        std::filesystem::remove_all(tmpDir);
+        state.ResumeTiming();
+    }
+
+    state.SetItemsProcessed(state.iterations() * fileCount);
+}
+
+/**
+ * After commit 1 — scan and hash merged into one pass:
+ *   Pass 1: canonicalisePathMetaData() — separate walk
+ *   Pass 2: scanForReferences(HashSink) — fused scan + hash
+ */
+static void BM_TwoPass_ScanHashMerged(benchmark::State & state)
+{
+    const int fileCount = state.range(0);
+    StorePathSet emptyRefs;
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto tmpDir = createTempDir();
+        auto root = createTestTree(tmpDir, fileCount);
+        state.ResumeTiming();
+
+        // Pass 1: Separate canonicalize walk
+        InodesSeen inodesSeen;
+        CanonicalizePathMetadataOptions options BENCH_CANON_OPTIONS;
+        canonicalisePathMetaData(root, options, inodesSeen);
+
+        // Pass 2: Fused scan + hash (commit 1's optimization)
         HashSink narHashSink{HashAlgorithm::SHA256};
         scanForReferences(narHashSink, root, emptyRefs);
         auto hash = narHashSink.finish();
@@ -85,7 +134,11 @@ static void BM_TwoPass_CanonicalizeAndScan(benchmark::State & state)
     state.SetItemsProcessed(state.iterations() * fileCount);
 }
 
-static void BM_SinglePass_FusedCanonicalizeAndScan(benchmark::State & state)
+/**
+ * All 3 commits — single traversal via CanonicalizingSourceAccessor:
+ *   Single pass: canonicalize + scan + hash fused together
+ */
+static void BM_SinglePass_FullyFused(benchmark::State & state)
 {
     const int fileCount = state.range(0);
     StorePathSet emptyRefs;
@@ -99,6 +152,7 @@ static void BM_SinglePass_FusedCanonicalizeAndScan(benchmark::State & state)
         InodesSeen inodesSeen;
         CanonicalizePathMetadataOptions options BENCH_CANON_OPTIONS;
 
+        // Single fused pass: canonicalize + scan + hash
         auto sourcePath = PosixSourceAccessor::createAtRoot(root);
         auto canonAccessor = make_ref<CanonicalizingSourceAccessor>(sourcePath.accessor, options, inodesSeen);
 
@@ -116,7 +170,8 @@ static void BM_SinglePass_FusedCanonicalizeAndScan(benchmark::State & state)
     state.SetItemsProcessed(state.iterations() * fileCount);
 }
 
-BENCHMARK(BM_TwoPass_CanonicalizeAndScan)->Arg(100)->Arg(1000)->Arg(5000);
-BENCHMARK(BM_SinglePass_FusedCanonicalizeAndScan)->Arg(100)->Arg(1000)->Arg(5000);
+BENCHMARK(BM_ThreePass_Master)->Arg(100)->Arg(1000)->Arg(5000)->Arg(10000)->Arg(20000);
+BENCHMARK(BM_TwoPass_ScanHashMerged)->Arg(100)->Arg(1000)->Arg(5000)->Arg(10000)->Arg(20000);
+BENCHMARK(BM_SinglePass_FullyFused)->Arg(100)->Arg(1000)->Arg(5000)->Arg(10000)->Arg(20000);
 
 #endif
